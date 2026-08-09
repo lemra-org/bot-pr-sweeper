@@ -1,0 +1,57 @@
+name: Auto-merge Dependabot PRs
+
+# Sweeps the repositories matched by the search query, then approves and merges
+# every Dependabot pull request whose checks are green. All the safety checks
+# live in scripts/auto-merge-dependabot.sh, which re-validates each pull request
+# against the API before writing anything.
+#
+# Every setting is a repository variable, under
+# Settings -> Secrets and variables -> Actions -> Variables. Any variable left
+# unset falls back to the default defined at the top of the script.
+
+on:
+  schedule:
+    # A few times a day, offset from the hour so it does not land in the busiest
+    # minute of GitHub's scheduling queue.
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+# The PAT below carries every permission this workflow needs; GITHUB_TOKEN needs
+# none of its own.
+permissions: {}
+
+concurrency:
+  group: auto-merge-dependabot
+  cancel-in-progress: false
+
+jobs:
+  auto-merge:
+    name: Approve and merge green Dependabot PRs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v5
+
+      - name: Approve and merge
+        env:
+          # Classic PAT with the `repo` and `workflow` scopes. `workflow` is
+          # required because github-actions updates edit files under
+          # .github/workflows/, which GitHub refuses to merge without it.
+          GH_TOKEN: ${{ secrets.AUTO_MERGE_PAT }}
+
+          SEARCH_QUERY_VAR: ${{ vars.SEARCH_QUERY }}
+          OWNERS_VAR: ${{ vars.OWNERS }}
+          REVIEW_REQUESTED_VAR: ${{ vars.REVIEW_REQUESTED }}
+          TEAM_REVIEW_REQUESTED_VAR: ${{ vars.TEAM_REVIEW_REQUESTED }}
+          ALLOWED_UPDATE_TYPES_VAR: ${{ vars.ALLOWED_UPDATE_TYPES }}
+          EXPECTED_AUTHORS_VAR: ${{ vars.EXPECTED_AUTHORS }}
+          MERGE_METHOD_VAR: ${{ vars.MERGE_METHOD }}
+          MAX_PRS_VAR: ${{ vars.MAX_PRS }}
+          ALLOW_NO_CHECKS_VAR: ${{ vars.ALLOW_NO_CHECKS }}
+          DELETE_BRANCH_VAR: ${{ vars.DELETE_BRANCH }}
+          # Set the DRY_RUN variable to `true` to make every run — scheduled and
+          # manual alike — report without approving or merging.
+          DRY_RUN_VAR: ${{ vars.DRY_RUN }}
+          FAIL_ON_ERROR_VAR: ${{ vars.FAIL_ON_ERROR }}
+        run: ./scripts/auto-merge-dependabot.sh
