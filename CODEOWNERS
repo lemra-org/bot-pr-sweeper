@@ -1,0 +1,9 @@
+# Code owners are requested for review automatically when a pull request is
+# opened, which is what makes this repository's own Dependabot pull requests
+# visible to the sweep — it looks for pull requests that request a review from
+# the account behind its token.
+#
+# The `reviewers:` key in dependabot.yml no longer exists; CODEOWNERS is the
+# supported way to get a reviewer onto a bot's pull requests.
+
+* @rm3l
