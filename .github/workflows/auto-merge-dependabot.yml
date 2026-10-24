@@ -54,4 +54,7 @@ jobs:
           # manual alike — report without approving or merging.
           DRY_RUN_VAR: ${{ vars.DRY_RUN }}
           FAIL_ON_ERROR_VAR: ${{ vars.FAIL_ON_ERROR }}
+          SUMMARY_ISSUE_REPO_VAR: ${{ vars.SUMMARY_ISSUE_REPO }}
+          SUMMARY_ISSUE_LABEL_VAR: ${{ vars.SUMMARY_ISSUE_LABEL }}
+          SUMMARY_ISSUE_TITLE_VAR: ${{ vars.SUMMARY_ISSUE_TITLE }}
         run: ./scripts/auto-merge-dependabot.sh

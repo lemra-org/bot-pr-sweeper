@@ -47,6 +47,9 @@ DEFAULT_DRY_RUN='false'
 DEFAULT_ALLOW_NO_CHECKS='false'
 DEFAULT_DELETE_BRANCH='true'
 DEFAULT_FAIL_ON_ERROR='false'
+DEFAULT_SUMMARY_ISSUE_REPO=''
+DEFAULT_SUMMARY_ISSUE_LABEL='auto-merge-summary'
+DEFAULT_SUMMARY_ISSUE_TITLE='Bot Auto-merge Summary'
 
 # cfg NAME DEFAULT -> first non-empty of $NAME_INPUT, $NAME_VAR, DEFAULT
 cfg() {
@@ -69,6 +72,9 @@ DRY_RUN="$(cfg DRY_RUN "${DEFAULT_DRY_RUN}")"
 ALLOW_NO_CHECKS="$(cfg ALLOW_NO_CHECKS "${DEFAULT_ALLOW_NO_CHECKS}")"
 DELETE_BRANCH="$(cfg DELETE_BRANCH "${DEFAULT_DELETE_BRANCH}")"
 FAIL_ON_ERROR="$(cfg FAIL_ON_ERROR "${DEFAULT_FAIL_ON_ERROR}")"
+SUMMARY_ISSUE_REPO="$(cfg SUMMARY_ISSUE_REPO "${DEFAULT_SUMMARY_ISSUE_REPO}")"
+SUMMARY_ISSUE_LABEL="$(cfg SUMMARY_ISSUE_LABEL "${DEFAULT_SUMMARY_ISSUE_LABEL}")"
+SUMMARY_ISSUE_TITLE="$(cfg SUMMARY_ISSUE_TITLE "${DEFAULT_SUMMARY_ISSUE_TITLE}")"
 
 SUMMARY_FILE="${GITHUB_STEP_SUMMARY:-/dev/null}"
 
@@ -148,6 +154,72 @@ record_failure() {
   local slug="$1" reason="$2"
   FAILED+=("${slug}|${reason}")
   warn "${slug}: ${reason}"
+}
+
+# Finds or creates a pinned GitHub issue whose body is replaced with each run's
+# summary, so the results are visible even when the workflow log is buried.
+update_summary_issue() {
+  local body_file="$1"
+  local repo="${SUMMARY_ISSUE_REPO}"
+  case "${repo}" in
+    '' | none | false) return 0 ;;
+    '@self')
+      repo="${GITHUB_REPOSITORY:-}"
+      if [[ -z "${repo}" ]]; then
+        warn "SUMMARY_ISSUE_REPO=@self but GITHUB_REPOSITORY is not set — skipping issue update"
+        return 0
+      fi
+      ;;
+  esac
+
+  local issue_body_file
+  issue_body_file="$(mktemp)"
+  {
+    printf '> Last updated: %s' "$(date -u '+%Y-%m-%d %H:%M UTC')"
+    if [[ -n "${GITHUB_SERVER_URL:-}" && -n "${GITHUB_REPOSITORY:-}" && -n "${GITHUB_RUN_ID:-}" ]]; then
+      printf ' · [workflow run](%s/%s/actions/runs/%s)' \
+        "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}"
+    fi
+    printf '\n\n'
+    cat "${body_file}"
+  } >"${issue_body_file}"
+
+  gh label create "${SUMMARY_ISSUE_LABEL}" -R "${repo}" \
+    --description "Tracks the bot auto-merge sweep summary" \
+    --color "0075ca" --force 2>/dev/null || true
+
+  local issue_number
+  issue_number="$(
+    gh issue list -R "${repo}" \
+      --label "${SUMMARY_ISSUE_LABEL}" \
+      --state open \
+      --limit 1 \
+      --json number \
+      --jq '.[0].number // empty' 2>/dev/null
+  )" || true
+
+  if [[ -n "${issue_number}" ]]; then
+    if gh issue edit "${issue_number}" -R "${repo}" --body-file "${issue_body_file}" >/dev/null 2>&1; then
+      log "Updated summary issue: https://github.com/${repo}/issues/${issue_number}"
+    else
+      warn "could not update summary issue ${repo}#${issue_number}"
+    fi
+  else
+    local issue_url
+    if issue_url="$(gh issue create -R "${repo}" \
+      --title "${SUMMARY_ISSUE_TITLE}" \
+      --label "${SUMMARY_ISSUE_LABEL}" \
+      --body-file "${issue_body_file}")"; then
+      issue_number="${issue_url##*/}"
+      log "Created summary issue: ${issue_url}"
+      gh issue pin "${issue_number}" -R "${repo}" >/dev/null 2>&1 ||
+        warn "could not pin ${repo}#${issue_number} (pinning requires admin access)"
+    else
+      warn "could not create summary issue in ${repo}"
+    fi
+  fi
+
+  rm -f "${issue_body_file}"
 }
 
 # Collapses statusCheckRollup into one word: none, pending, failure or success.
@@ -367,7 +439,11 @@ fi
 
 if (( ${#urls[@]} == 0 )); then
   log "No pull requests matched the query."
-  printf '## Dependabot auto-merge\n\nNo pull requests matched the query.\n' >>"${SUMMARY_FILE}"
+  report_file="$(mktemp)"
+  printf '## Bot auto-merge\n\nNo pull requests matched the query.\n' >"${report_file}"
+  cat "${report_file}" >>"${SUMMARY_FILE}"
+  update_summary_issue "${report_file}"
+  rm -f "${report_file}"
   exit 0
 fi
 
@@ -562,8 +638,9 @@ for url in "${urls[@]}"; do
 done
 
 # --- Report -------------------------------------------------------------------
+report_file="$(mktemp)"
 {
-  printf '## Dependabot auto-merge\n\n'
+  printf '## Bot auto-merge\n\n'
   # shellcheck disable=SC2016  # backticks here are Markdown, not command substitution
   printf '`%s`\n\n' "${query_terms[*]}"
   printf -- '- merged: **%d**\n- skipped: **%d**\n- errors: **%d**\n\n' \
@@ -590,7 +667,10 @@ done
   fi
   emit_table 'Skipped' 'Reason' "${SKIPPED[@]+"${SKIPPED[@]}"}"
   emit_table 'Errors' 'Reason' "${FAILED[@]+"${FAILED[@]}"}"
-} >>"${SUMMARY_FILE}"
+} >"${report_file}"
+cat "${report_file}" >>"${SUMMARY_FILE}"
+update_summary_issue "${report_file}"
+rm -f "${report_file}"
 
 log ""
 log "Done: ${#MERGED[@]} merged, ${#SKIPPED[@]} skipped, ${#FAILED[@]} error(s)."

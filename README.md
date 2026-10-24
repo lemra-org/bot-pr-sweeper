@@ -62,6 +62,9 @@ which is defined at the top of the script.
 | `DELETE_BRANCH` | `true` | Delete the Dependabot branch after merging. |
 | `DRY_RUN` | `false` | Report what would happen without approving or merging. |
 | `FAIL_ON_ERROR` | `false` | Exit non-zero when any pull request errored. |
+| `SUMMARY_ISSUE_REPO` | *(empty — disabled)* | Publish the run summary as a pinned GitHub issue instead of only the workflow step summary. `@self` resolves to the repository running the workflow; any other value is an explicit `owner/repo`. `none` disables it. |
+| `SUMMARY_ISSUE_LABEL` | `auto-merge-summary` | Label used to locate the issue. Created automatically on first run. |
+| `SUMMARY_ISSUE_TITLE` | `Bot Auto-merge Summary` | Title of the issue when created for the first time. |
 
 There is no separate dry-run for manual dispatches: a `workflow_dispatch` run
 behaves exactly like a scheduled one. To rehearse a change, set the `DRY_RUN`
